@@ -118,43 +118,68 @@ const searchForQuote = (author, date, content) => {
 	return results;
 };
 
-// Pass the entire Canvas object because you'll need to access its width, as well its context
-const autoFont = (canvas, text, pos, startSize) => {
-	const ctx = canvas.getContext('2d');
-
+const autoSizeFont = ({canvas, ctx, text, pos, startSize, minimumSize}) => {
 	// Declare a base size of the font
 	let fontSize = startSize;
 	let width = 0;
-
+	let fitTextIn = false;
 	do {
 		// Assign the font to the context and decrement it so it can be measured again
 		ctx.font = `${fontSize -= 5}px Courier New`;
-		width = ctx.measureText(text).width 
+		width = ctx.measureText(text).width;
+		fitTextIn = !(width + pos.x > canvas.width - 100);
 		// Compare pixel width of the text to the canvas minus the approximate avatar size
-	} while (width + pos.x > canvas.width - 100);
+	} while (!fitTextIn && fontSize >= minimumSize);
+	return {fontSize, width, fitTextIn, font:ctx.font};
+}
+
+// Pass the entire Canvas object because you'll need to access its width, as well its context
+const autoFont = ({canvas, text, pos, startSize, minimumSize}) => {
+	const ctx = canvas.getContext('2d');
+
+	let newText = text;
+
+	// Declare a base size of the font
+	let fitTextIn = false;
+	let parts = text.split(" ");
+	let sizing;
+	let wordbreakPos = parts.length - 1;
+
+	do {
+		sizing = autoSizeFont({canvas, ctx, text:newText, pos, startSize, minimumSize});
+		fitTextIn = sizing.fitTextIn;
+		if (!fitTextIn) {
+			if (wordbreakPos < parts.length / 2) break;
+			let newParts = parts.slice();
+			newParts.splice(wordbreakPos, 0, "\n");
+			newText = newParts.join(" ");
+			wordbreakPos--;
+		}
+	} while (!fitTextIn);
 
 	// Return the result to use in the actual canvas
-	return {font: ctx.font, width, size: fontSize};
+	return {font:sizing.font, width:sizing.width, size:sizing.fontSize, text:newText};
 };
 
-const drawText = (canvas, ctx, text, pos, size) => {
-	const autoFontSize = autoFont(canvas, text, pos, size);
+const drawText = ({canvas, ctx, text, pos, size, minimumSize}) => {
+	const autoFontSize = autoFont({canvas, text, pos, startSize:size, minimumSize});
 
+	noOfLines = autoFontSize.text.split("\n").length;
 	ctx.fillStyle = "rgba(0,0,0,0.5)";
-	ctx.fillRect(pos.x - 20, pos.y - (autoFontSize.size / 2) - 30, autoFontSize.width + 20, autoFontSize.size + 30);
+	ctx.fillRect(pos.x - 20, pos.y - (autoFontSize.size / 2) - 30, autoFontSize.width + 20, (autoFontSize.size * noOfLines) + 30);
 
 	ctx.font = autoFontSize.font;
 	// Select the style that will be used to fill the text in
 	ctx.globalCompositeOperation = "difference";
 	ctx.fillStyle = "white";
 	// Actually fill the text with a solid color
-	ctx.fillText(text, pos.x, pos.y);
+	ctx.fillText(autoFontSize.text, pos.x, pos.y);
 	
 	// Overlay with transparent white text to bring out more
 	ctx.globalCompositeOperation = "source-over";
 	ctx.fillStyle = "rgba(255,255,255,0.3)";
 	// Actually fill the text with a solid color
-	ctx.fillText(text, pos.x, pos.y);
+	ctx.fillText(autoFontSize.text, pos.x, pos.y);
 }
 
 const putQuoteOnImage = async (imgPath, quote) => {
@@ -168,8 +193,8 @@ const putQuoteOnImage = async (imgPath, quote) => {
 	
 	ctx.drawImage(img, 0, 0, dimensions.width, dimensions.height);
 
-	drawText(canvas, ctx, '"' + quote.quote + '"', pos, 70);
-	drawText(canvas, ctx, "- " + quote.author + ", " + quote.date, {x: pos.x + 150, y: pos.y + 200}, 50);
+	drawText({canvas, ctx, text:'"' + quote.quote + '"', pos, size:120, minimumSize:110});
+	drawText({canvas, ctx, text:"- " + quote.author + ", " + quote.date, pos:{x: pos.x + 150, y: pos.y + 200}, size:50, minimumSize:30});
 
 	return canvas.toBuffer();
 }
@@ -189,8 +214,6 @@ client.on("message", async function(message) {
 
 	if (!content.startsWith("!q")) return;
 	const args = content.split(" ");
-
-	console.log("HI!");
 
 	if (args[1] === "-s") {
 		if (args.length < 3) {
