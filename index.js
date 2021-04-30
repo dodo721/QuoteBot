@@ -193,7 +193,7 @@ const putQuoteOnImage = async (imgPath, quote) => {
 	
 	ctx.drawImage(img, 0, 0, dimensions.width, dimensions.height);
 
-	drawText({canvas, ctx, text:'"' + quote.quote + '"', pos, size:120, minimumSize:110});
+	drawText({canvas, ctx, text:'"' + quote.quote + '"', pos, size:70, minimumSize:30});
 	drawText({canvas, ctx, text:"- " + quote.author + ", " + quote.date, pos:{x: pos.x + 150, y: pos.y + 200}, size:50, minimumSize:30});
 
 	return canvas.toBuffer();
