@@ -138,19 +138,23 @@ const autoFont = (canvas, text, pos, startSize) => {
 };
 
 const drawText = (canvas, ctx, text, pos, size) => {
-	const textSizeInfo = autoFont(canvas, text, pos, size);
+	const autoFontSize = autoFont(canvas, text, pos, size);
 
 	ctx.fillStyle = "rgba(0,0,0,0.5)";
-	ctx.fillRect(pos.x - 20, pos.y - (textSizeInfo.size / 2) - 30, textSizeInfo.width + 20, textSizeInfo.size + 30);
+	ctx.fillRect(pos.x - 20, pos.y - (autoFontSize.size / 2) - 30, autoFontSize.width + 20, autoFontSize.size + 30);
 
-	// Select the font size and type from one of the natively available fonts
-	ctx.font = textSizeInfo.font;
+	ctx.font = autoFontSize.font;
 	// Select the style that will be used to fill the text in
 	ctx.globalCompositeOperation = "difference";
 	ctx.fillStyle = "white";
 	// Actually fill the text with a solid color
 	ctx.fillText(text, pos.x, pos.y);
+	
+	// Overlay with transparent white text to bring out more
 	ctx.globalCompositeOperation = "source-over";
+	ctx.fillStyle = "rgba(255,255,255,0.3)";
+	// Actually fill the text with a solid color
+	ctx.fillText(text, pos.x, pos.y);
 }
 
 const putQuoteOnImage = async (imgPath, quote) => {
