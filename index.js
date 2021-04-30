@@ -4,30 +4,46 @@ const fs = require('fs');
 const Canvas = require('canvas');
 const sizeOf = require('image-size');
 
-const quotebook = [];
+let quotebook = [];
+let quotebookStr = "";
 const backgrounds = [];
 
 console.log("Loading...");
 
-fs.readFile('./Quotebook.txt', 'utf8' , (err, data) => {
-	if (err) {
-		console.error(err);
-		return;
-	}
-	data.split("\n").forEach(quote => {
-		const quoteRegex = /"(.*)" ?- ?(.*) (.*)/g;
-		const match = quoteRegex.exec(quote);
-		if (!match) {
-			console.error("Could not parse quote: ", quote);
+const loadQuotebook = () => {
+	quotebook = [];
+	fs.readFile('./Quotebook.txt', 'utf8' , (err, data) => {
+		if (err) {
+			console.error(err);
 			return;
 		}
-		const text = match[1];
-		const author = match[2];
-		const date = match[3];
-		quotebook.push({quote:text, author, date});
+		quotebookStr = data;
+		data.split("\n").forEach(quote => {
+			const quoteRegex = /"(.*)" ?- ?(.*) (.*)/g;
+			const match = quoteRegex.exec(quote);
+			if (!match) {
+				console.error("Could not parse quote: ", quote);
+				return;
+			}
+			const text = match[1];
+			const author = match[2];
+			const date = match[3];
+			quotebook.push({quote:text, author, date});
+		});
+		console.log("Loaded " + quotebook.length + " quotes, lets quote babey");
 	});
-	console.log("Loaded " + quotebook.length + " quotes, lets quote babey");
-});
+};
+
+const newQuote = quote => {
+	const newQuoteStr = '"' + quote.quote + '" - ' + quote.author + ' ' + quote.date;
+	return new Promise ((resolve, reject) => {
+		fs.writeFile('Quotebook.txt', quotebookStr + "\n" + newQuoteStr, function (err) {
+			if (err) reject(err);
+			loadQuotebook();
+			resolve();
+		});
+	});
+};
 
 fs.readdir("./backgrounds/", (err, files) => {
 	if (err) {
@@ -39,6 +55,8 @@ fs.readdir("./backgrounds/", (err, files) => {
 	});
 	console.log("Loaded " + backgrounds.length + " backgrounds");
 });
+
+loadQuotebook();
 
 const authorDateMatch = (author, date, quote) => {
 	const author1 = quote.author.toLowerCase();
@@ -162,12 +180,19 @@ client.on("message", async function(message) {
 	if (message.author.bot) return;
 
 	const content = message.content;
+	const channel = message.channel;
 	if (!content.startsWith("!q")) return;
 
 	if (!content.startsWith("!q")) return;
 	const args = content.split(" ");
 
+	console.log("HI!");
+
 	if (args[1] === "-s") {
+		if (args.length < 3) {
+			message.reply("Search usage: !quote -s <author> [date | content] [...content]")
+			return;
+		}
 		const author = args[2];
 		const date = Number.isInteger(args[3]) && args[3];
 		let content = "";
@@ -182,18 +207,27 @@ client.on("message", async function(message) {
 		msg += "\n```";
 		message.reply(msg);
 		return;
+	} else if (args[1] === "-a") {
+		if (args.length < 4) {
+			message.reply("Add usage: !quote -a <author> <date> <...content>")
+			return;
+		}
+		const author = args[2];
+		const date = args[3];
+		const content = args.splice(4, args.length).join(" ");
+		const quote = {quote:content, author, date};
+		await newQuote(quote);
+		message.reply("Added new quote " + quoteToStr(quote));
+		return;
 	}
 
 	const person = args.length > 1 && args[1];
 	const date = args.length > 2 && args[2];
 	const quote = chooseQuote(person, date);
-	const channel = message.channel;
 	if (quote) {
 		const img = await putQuoteOnImage(chooseBackground(), quote);
 		if (img) {
 			const attachment = new Discord.MessageAttachment(img, 'welcome-image.png');
-
-			const channel = message.channel;
 			channel.send(null, attachment);
 		} else {
 			channel.send(quoteToStr(quote));
