@@ -1,49 +1,14 @@
 const Discord = require("discord.js");
-const config = require("./config.json");
 const fs = require('fs');
+const config = require("./config.json");
 const Canvas = require('canvas');
 const sizeOf = require('image-size');
+const QuotebookIO = require('./quotebook-io.js');
 
-let quotebook = [];
-let quotebookStr = "";
+let quotebook = QuotebookIO.getQuotebook();
 const backgrounds = [];
 
 console.log("Loading...");
-
-const loadQuotebook = () => {
-	quotebook = [];
-	fs.readFile('./Quotebook.txt', 'utf8' , (err, data) => {
-		if (err) {
-			console.error(err);
-			return;
-		}
-		quotebookStr = data;
-		data.split("\n").forEach(quote => {
-			const quoteRegex = /"(.*)" ?- ?(.*) (.*)/g;
-			const match = quoteRegex.exec(quote);
-			if (!match) {
-				console.error("Could not parse quote: ", quote);
-				return;
-			}
-			const text = match[1];
-			const author = match[2];
-			const date = match[3];
-			quotebook.push({quote:text, author, date});
-		});
-		console.log("Loaded " + quotebook.length + " quotes, lets quote babey");
-	});
-};
-
-const newQuote = quote => {
-	const newQuoteStr = '"' + quote.quote + '" - ' + quote.author + ' ' + quote.date;
-	return new Promise ((resolve, reject) => {
-		fs.writeFile('Quotebook.txt', quotebookStr + "\n" + newQuoteStr, function (err) {
-			if (err) reject(err);
-			loadQuotebook();
-			resolve();
-		});
-	});
-};
 
 fs.readdir("./backgrounds/", (err, files) => {
 	if (err) {
@@ -56,13 +21,56 @@ fs.readdir("./backgrounds/", (err, files) => {
 	console.log("Loaded " + backgrounds.length + " backgrounds");
 });
 
-loadQuotebook();
+const captureGlyphs = {
+	"'" : "'",
+	'"' : '"',
+	"(" : ")"
+};
+
+const removeEscapes = str => {
+	let res = str;
+	Object.keys(captureGlyphs).forEach(glyph => {
+		res = res.replace("\\" + glyph, glyph);
+		res = res.replace("\\" + captureGlyphs[glyph], captureGlyphs[glyph]);
+	});
+	return res;
+};
+
+const parseArgs = cmd => {
+	let res = [];
+	let terminator = null;
+	const parts = cmd.split(" ");
+	parts.forEach(part => {
+		if (!part) return;
+		if (terminator) {
+			if (part.endsWith(terminator) && !part.endsWith("\\" + terminator)) {
+				const toAdd = part.substring(0, part.length - terminator.length);
+				terminator = null;
+				res[res.length - 1] += " " + removeEscapes(toAdd);
+				return;
+			}
+			res[res.length - 1] += " " + removeEscapes(part);
+			return;
+		}
+		Object.keys(captureGlyphs).forEach(initiator => {
+			if (part.startsWith(initiator) && !part.startsWith("\\" + initiator)) {
+				terminator = captureGlyphs[initiator];
+				res.push(removeEscapes(part.replace(initiator, "")));
+			}
+		});
+		if (terminator) return;
+		res.push(removeEscapes(part));
+	});
+	return res;
+};
 
 const authorDateMatch = (author, date, quote) => {
-	const author1 = quote.author.toLowerCase();
-	const author2 = author && author.toLowerCase();
+	const author1 = quote.author.toLowerCase().replace(" ", "");
+	const author2 = author && author.toLowerCase().replace (" ", "");
+	const date1 = quote.date.toLowerCase().replace(" ", "");
+	const date2 = date && date.toLowerCase().replace(" ", "");
 	let authorMatch = !author || author1 === author2 || author1.includes(author2) || author2.includes(author1);
-	let dateMatch = !date || date === quote.date;
+	let dateMatch = !date || date1 === date2 || date1.includes(date2) || date2.includes(date1);
 	return authorMatch && dateMatch;
 }
 
@@ -203,6 +211,8 @@ const chooseBackground = () => {
 	return "./backgrounds/" + backgrounds[Math.floor(Math.random() * backgrounds.length)];
 };
 
+let pendingConfirmations = {};
+
 const client = new Discord.Client();
 
 client.on("message", async function(message) {
@@ -210,10 +220,13 @@ client.on("message", async function(message) {
 
 	const content = message.content;
 	const channel = message.channel;
-	if (!content.startsWith("!q")) return;
 
 	if (!content.startsWith("!q")) return;
-	const args = content.split(" ");
+	/*if (content.includes("\n")) {
+		channel.send("Multiple lines are not yet supported by QuoteBot.");
+		return;
+	}*/
+	const args = parseArgs(content);
 
 	if (args[1] === "-s") {
 		if (args.length < 3) {
@@ -243,8 +256,46 @@ client.on("message", async function(message) {
 		const date = args[3];
 		const content = args.splice(4, args.length).join(" ");
 		const quote = {quote:content, author, date};
-		await newQuote(quote);
-		message.reply("Added new quote " + quoteToStr(quote));
+		pendingConfirmations[message.author.id] = quote;
+		channel.send("This will add the following quote:\n```\"" + quote.quote + "\"\nAuthor: " + quote.author + "\nDate: " + quote.date + "```\nUse !q -y to confirm, or !q -n to cancel.");
+		return;
+	} else if (args[1] === "-y" || args[1] === "-n") {
+		if (!pendingConfirmations[message.author.id]) {
+			message.reply("you have no pending quotes to confirm.");
+		} else if (args[1] === "-n") {
+			message.reply("your pending quote has been deleted.");
+			delete pendingConfirmations[message.author.id];
+		} else {
+			const quote = pendingConfirmations[message.author.id];
+			delete pendingConfirmations[message.author.id];
+			console.log("Added new quote:", quote);
+	                await QuotebookIO.newQuote(quote);
+	                quotebook = QuotebookIO.getQuotebook();
+	                message.reply("Added new quote " + quoteToStr(quote));
+		}
+		return;
+	} else if (args[1] === "-h") {
+		const help = `
+"QuoteBots are a dumb idea" - person stabbed, 2021
+
+COMMANDS:
+\`\`\`
+<> = mandatory, [] = optional, ... = any number of arguments
+
+!q [author] [date] - generate a random quote from author and date (if given).
+!q -s <author> [date | content] [...content] - search for a quote by author, date and content. NOTE: only searches by date if the 2nd argument is recognised as a number.
+!q -a <author> <date> <...content> - add a new quote to the quotebook.
+!q -h - show this message.
+\`\`\`
+
+SYNTAX:
+\`\`\`
+When writing a new quote or searching for one, sometimes you want to use an author or date that contains spaces.
+All commands are parsed for brackets (), quotes "" and single quotes ''. Using these will group all text contained between into one argument.
+If you want to include those characters normally, you can escape them with a backslash: \\( \\)
+\`\`\`
+		`;
+		channel.send(help);
 		return;
 	}
 
@@ -254,7 +305,7 @@ client.on("message", async function(message) {
 	if (quote) {
 		const img = await putQuoteOnImage(chooseBackground(), quote);
 		if (img) {
-			const attachment = new Discord.MessageAttachment(img, 'welcome-image.png');
+			const attachment = new Discord.MessageAttachment(img, 'quote.png');
 			channel.send(null, attachment);
 		} else {
 			channel.send(quoteToStr(quote));
@@ -265,3 +316,4 @@ client.on("message", async function(message) {
 });
 
 client.login(config.BOT_TOKEN);
+
